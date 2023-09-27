@@ -37,7 +37,6 @@
 #include "sdkconfig.h"
 #include "rom/uart.h"
 
-#include "smbus.h"
 #include "i2c-lcd1602.h"
 
 #define TAG "app"
@@ -59,20 +58,21 @@
 #define I2C_MASTER_NUM           I2C_NUM_0
 #define I2C_MASTER_TX_BUF_LEN    0                     // disabled
 #define I2C_MASTER_RX_BUF_LEN    0                     // disabled
-#define I2C_MASTER_FREQ_HZ       100000
+#define I2C_MASTER_FREQ_HZ       400000
 #define I2C_MASTER_SDA_IO        CONFIG_I2C_MASTER_SDA
 #define I2C_MASTER_SCL_IO        CONFIG_I2C_MASTER_SCL
 
 static void i2c_master_init(void)
 {
     int i2c_master_port = I2C_MASTER_NUM;
-    i2c_config_t conf;
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_MASTER_SDA_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_DISABLE;  // GY-2561 provides 10kΩ pullups
-    conf.scl_io_num = I2C_MASTER_SCL_IO;
-    conf.scl_pullup_en = GPIO_PULLUP_DISABLE;  // GY-2561 provides 10kΩ pullups
-    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,  // GY-2561 provides 10kΩ pullups
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,  // GY-2561 provides 10kΩ pullups
+        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+    };
     i2c_param_config(i2c_master_port, &conf);
     i2c_driver_install(i2c_master_port, conf.mode,
                        I2C_MASTER_RX_BUF_LEN,
@@ -88,14 +88,14 @@ static uint8_t _wait_for_user(void)
 #ifdef USE_STDIN
     while (!c)
     {
-       STATUS s = uart_rx_one_char(&c);
-       if (s == OK) {
+       ETS_STATUS s = uart_rx_one_char(&c);
+       if (s == ETS_OK) {
           printf("%c", c);
        }
        vTaskDelay(1);
     }
 #else
-    vTaskDelay(1000 / portTICK_RATE_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 #endif
     return c;
 }
@@ -105,16 +105,12 @@ void lcd1602_task(void * pvParameter)
     // Set up I2C
     i2c_master_init();
     i2c_port_t i2c_num = I2C_MASTER_NUM;
+    
     uint8_t address = CONFIG_LCD1602_I2C_ADDRESS;
-
-    // Set up the SMBus
-    smbus_info_t * smbus_info = smbus_malloc();
-    ESP_ERROR_CHECK(smbus_init(smbus_info, i2c_num, address));
-    ESP_ERROR_CHECK(smbus_set_timeout(smbus_info, 1000 / portTICK_RATE_MS));
 
     // Set up the LCD1602 device with backlight off
     i2c_lcd1602_info_t * lcd_info = i2c_lcd1602_malloc();
-    ESP_ERROR_CHECK(i2c_lcd1602_init(lcd_info, smbus_info, true,
+    ESP_ERROR_CHECK(i2c_lcd1602_init(lcd_info, i2c_num, address, true,
                                      LCD_NUM_ROWS, LCD_NUM_COLUMNS, LCD_NUM_VISIBLE_COLUMNS));
 
     ESP_ERROR_CHECK(i2c_lcd1602_reset(lcd_info));
@@ -191,7 +187,7 @@ void lcd1602_task(void * pvParameter)
     for (int i = 0; i < 8; ++i)
     {
         i2c_lcd1602_scroll_display_left(lcd_info);
-        vTaskDelay(200 / portTICK_RATE_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
 
     ESP_LOGI(TAG, "scroll display right 8 places quickly");
@@ -226,7 +222,7 @@ void lcd1602_task(void * pvParameter)
     for (int i = 0; i < 5; ++i)
     {
         i2c_lcd1602_write_char(lcd_info, '>');
-        vTaskDelay(200 / portTICK_RATE_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
 
     ESP_LOGI(TAG, "change address counter to decrement (right to left) and display <<<<<");
@@ -235,7 +231,7 @@ void lcd1602_task(void * pvParameter)
     for (int i = 0; i < 5; ++i)
     {
         i2c_lcd1602_write_char(lcd_info, '<');
-        vTaskDelay(200 / portTICK_RATE_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
 
     ESP_LOGI(TAG, "disable auto-scroll and display +++++");
@@ -244,7 +240,7 @@ void lcd1602_task(void * pvParameter)
     for (int i = 0; i < 5; ++i)
     {
         i2c_lcd1602_write_char(lcd_info, '+');
-        vTaskDelay(200 / portTICK_RATE_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
 
     ESP_LOGI(TAG, "set left_to_right and display >>>>>");
@@ -253,7 +249,7 @@ void lcd1602_task(void * pvParameter)
     for (int i = 0; i < 5; ++i)
     {
         i2c_lcd1602_write_char(lcd_info, '>');
-        vTaskDelay(200 / portTICK_RATE_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
 
     ESP_LOGI(TAG, "clear display and disable cursor");
@@ -320,7 +316,7 @@ void lcd1602_task(void * pvParameter)
     while (1)
     {
         i2c_lcd1602_write_char(lcd_info, c);
-        vTaskDelay(100 / portTICK_RATE_MS);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
         ESP_LOGD(TAG, "col %d, row %d, char 0x%02x", col, row, c);
         ++c;
         ++col;
